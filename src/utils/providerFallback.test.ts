@@ -7,6 +7,7 @@ import {
 } from './settings/settingsCache.js'
 
 import * as actualProviderProfiles from './providerProfiles.js'
+import * as actualSettings from './settings/settings.js'
 
 function buildProfile(
   overrides: Partial<actualProviderProfiles.ProviderProfile> = {},
@@ -24,11 +25,22 @@ function buildProfile(
 
 async function importFreshProviderFallback(
   profileMocks: Partial<typeof actualProviderProfiles>,
+  settingsOverride: Record<string, unknown> = {},
 ) {
   mock.restore()
   mock.module('./providerProfiles.js', () => ({
     ...actualProviderProfiles,
     ...profileMocks,
+  }))
+  // Stub `getSettings_DEPRECATED` directly so the resolver sees the test's
+  // intended `providerFallbackChain` regardless of session-cache reset
+  // behavior under nonced re-imports. setSessionSettingsCache() works under
+  // bun locally but doesn't survive a fresh `import('?ts=...')` because the
+  // settings module loads its own cache instance on each fresh import.
+  mock.module('./settings/settings.js', () => ({
+    ...actualSettings,
+    getSettings_DEPRECATED: () => settingsOverride,
+    getInitialSettings: () => settingsOverride,
   }))
   const nonce = `${Date.now()}-${Math.random()}`
   return import(`./providerFallback.js?ts=${nonce}`)
@@ -50,13 +62,10 @@ test('getProviderFallbackChain: returns [] when unset', async () => {
 })
 
 test('getProviderFallbackChain: returns configured ids', async () => {
-  setSessionSettingsCache({
-    settings: {
-      providerFallbackChain: ['profile_a', 'profile_b'],
-    } as unknown as Record<string, unknown>,
-    errors: [],
-  })
-  const { getProviderFallbackChain } = await importFreshProviderFallback({})
+  const { getProviderFallbackChain } = await importFreshProviderFallback(
+    {},
+    { providerFallbackChain: ['profile_a', 'profile_b'] },
+  )
   expect(getProviderFallbackChain()).toEqual(['profile_a', 'profile_b'])
 })
 
@@ -64,13 +73,12 @@ test('getProviderFallbackChain: filters non-string + empty entries', async () =>
   // Setting could be hand-edited to a malformed shape. Defensive filter keeps
   // the resolver from crashing on garbage without making it the source of a
   // hard error during a rate-limit recovery flow.
-  setSessionSettingsCache({
-    settings: {
+  const { getProviderFallbackChain } = await importFreshProviderFallback(
+    {},
+    {
       providerFallbackChain: ['profile_a', '', null, 5, 'profile_b'],
-    } as unknown as Record<string, unknown>,
-    errors: [],
-  })
-  const { getProviderFallbackChain } = await importFreshProviderFallback({})
+    },
+  )
   expect(getProviderFallbackChain()).toEqual(['profile_a', 'profile_b'])
 })
 
@@ -167,17 +175,14 @@ test('resolveNextFallbackProvider: every candidate missing → null', async () =
 test('resolveNextFallbackProviderFromState: pulls chain + active from real settings/state', async () => {
   const a = buildProfile({ id: 'profile_a' })
   const b = buildProfile({ id: 'profile_b' })
-  setSessionSettingsCache({
-    settings: {
-      providerFallbackChain: ['profile_a', 'profile_b'],
-    } as unknown as Record<string, unknown>,
-    errors: [],
-  })
   const { resolveNextFallbackProviderFromState } =
-    await importFreshProviderFallback({
-      getProviderProfiles: () => [a, b],
-      getActiveProviderProfile: () => a,
-    })
+    await importFreshProviderFallback(
+      {
+        getProviderProfiles: () => [a, b],
+        getActiveProviderProfile: () => a,
+      },
+      { providerFallbackChain: ['profile_a', 'profile_b'] },
+    )
 
   const result = resolveNextFallbackProviderFromState()
   expect(result?.nextProfileId).toBe('profile_b')
