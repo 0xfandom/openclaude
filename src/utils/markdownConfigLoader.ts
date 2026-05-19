@@ -63,6 +63,42 @@ function getMaxMarkdownFileSizeBytes(): number {
     : DEFAULT_MAX_MARKDOWN_FILE_SIZE_BYTES
 }
 
+export type OversizedMarkdownSkip = {
+  filePath: string
+  sizeBytes: number
+  maxBytes: number
+}
+
+// Track files skipped because they exceeded the size cap so the override is
+// discoverable without `/debug` — a silent skip would just look like "my
+// custom agent disappeared". First skip in a process also emits one stderr
+// warning naming the override env var. Keyed by filePath so subsequent loads
+// of the same file don't re-warn.
+const oversizedMarkdownSkips = new Map<string, OversizedMarkdownSkip>()
+let oversizedSkipStderrWarned = false
+
+export function getOversizedMarkdownSkips(): OversizedMarkdownSkip[] {
+  return Array.from(oversizedMarkdownSkips.values())
+}
+
+export function clearOversizedMarkdownSkipsForTesting(): void {
+  oversizedMarkdownSkips.clear()
+  oversizedSkipStderrWarned = false
+}
+
+function recordOversizedSkip(skip: OversizedMarkdownSkip): void {
+  if (oversizedMarkdownSkips.has(skip.filePath)) return
+  oversizedMarkdownSkips.set(skip.filePath, skip)
+  if (!oversizedSkipStderrWarned) {
+    oversizedSkipStderrWarned = true
+    process.stderr.write(
+      `openclaude: skipping oversized markdown config file ${skip.filePath} ` +
+        `(${skip.sizeBytes} bytes > ${skip.maxBytes} max). Set ` +
+        `CLAUDE_CODE_MAX_MARKDOWN_FILE_SIZE_BYTES to raise the cap.\n`,
+    )
+  }
+}
+
 export type MarkdownFile = {
   filePath: string
   baseDir: string
@@ -625,6 +661,11 @@ async function loadMarkdownFiles(dir: string): Promise<
         try {
           const fileStat = await stat(filePath)
           if (fileStat.size > maxFileSize) {
+            recordOversizedSkip({
+              filePath,
+              sizeBytes: fileStat.size,
+              maxBytes: maxFileSize,
+            })
             logForDebugging(
               `Skipping oversized markdown file ${filePath} (${fileStat.size} bytes > ${maxFileSize} max). Set CLAUDE_CODE_MAX_MARKDOWN_FILE_SIZE_BYTES to override.`,
               { level: 'warn' },

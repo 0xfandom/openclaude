@@ -2,7 +2,11 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { mkdtemp, mkdir, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { loadMarkdownFilesForSubdir } from './markdownConfigLoader.js'
+import {
+  clearOversizedMarkdownSkipsForTesting,
+  getOversizedMarkdownSkips,
+  loadMarkdownFilesForSubdir,
+} from './markdownConfigLoader.js'
 import {
   acquireSharedMutationLock,
   releaseSharedMutationLock,
@@ -41,6 +45,7 @@ beforeEach(async () => {
   process.env.CLAUDE_CODE_USE_NATIVE_FILE_SEARCH = '1'
   delete process.env.CLAUDE_CODE_MAX_MARKDOWN_FILE_SIZE_BYTES
   loadMarkdownFilesForSubdir.cache.clear?.()
+  clearOversizedMarkdownSkipsForTesting()
 })
 
 afterEach(async () => {
@@ -50,6 +55,7 @@ afterEach(async () => {
     restore('CLAUDE_CODE_USE_NATIVE_FILE_SEARCH')
     restore('CLAUDE_CODE_MAX_MARKDOWN_FILE_SIZE_BYTES')
     loadMarkdownFilesForSubdir.cache.clear?.()
+    clearOversizedMarkdownSkipsForTesting()
   } finally {
     releaseSharedMutationLock()
   }
@@ -97,6 +103,42 @@ describe('loadMarkdownFilesForSubdir (#769 scaling)', () => {
     const loadedNames = files.map(f => f.frontmatter['name'])
     expect(loadedNames).toContain('tiny')
     expect(loadedNames).not.toContain('huge')
+  })
+
+  test('records skipped oversized files and emits one stderr warning', async () => {
+    const agentsDir = join(process.env.CLAUDE_CONFIG_DIR!, 'agents')
+    process.env.CLAUDE_CODE_MAX_MARKDOWN_FILE_SIZE_BYTES = '1024'
+    loadMarkdownFilesForSubdir.cache.clear?.()
+
+    const captured: string[] = []
+    const origWrite = process.stderr.write.bind(process.stderr)
+    ;(process.stderr.write as unknown as (s: string) => boolean) = (
+      s: string,
+    ): boolean => {
+      captured.push(s)
+      return true
+    }
+
+    try {
+      await writeAgent(agentsDir, 'huge-a', 'a'.repeat(2048))
+      await writeAgent(agentsDir, 'huge-b', 'b'.repeat(2048))
+      await loadMarkdownFilesForSubdir('agents', tempDir)
+
+      const skips = getOversizedMarkdownSkips()
+      expect(skips.length).toBe(2)
+      expect(skips.every(s => s.maxBytes === 1024)).toBe(true)
+      expect(skips.every(s => s.sizeBytes > 1024)).toBe(true)
+
+      const warnings = captured.filter(line =>
+        line.includes('skipping oversized markdown config file'),
+      )
+      expect(warnings.length).toBe(1)
+      expect(warnings[0]).toContain(
+        'CLAUDE_CODE_MAX_MARKDOWN_FILE_SIZE_BYTES',
+      )
+    } finally {
+      ;(process.stderr.write as unknown) = origWrite
+    }
   })
 
   test('size cap is overridable via env var', async () => {
