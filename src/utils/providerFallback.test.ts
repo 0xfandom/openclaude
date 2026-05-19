@@ -6,12 +6,13 @@ import {
   setSessionSettingsCache,
 } from './settings/settingsCache.js'
 
+import * as actualConfig from './config.js'
 import * as actualProviderProfiles from './providerProfiles.js'
 import * as actualSettings from './settings/settings.js'
 
 function buildProfile(
-  overrides: Partial<actualProviderProfiles.ProviderProfile> = {},
-): actualProviderProfiles.ProviderProfile {
+  overrides: Partial<actualConfig.ProviderProfile> = {},
+): actualConfig.ProviderProfile {
   return {
     id: 'profile_x',
     name: 'X',

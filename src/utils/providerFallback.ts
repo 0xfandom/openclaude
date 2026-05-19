@@ -10,10 +10,10 @@
 // does it exist as a real configured profile?".
 
 import { getSettings_DEPRECATED } from './settings/settings.js'
+import { type ProviderProfile } from './config.js'
 import {
   getActiveProviderProfile,
   getProviderProfiles,
-  type ProviderProfile,
 } from './providerProfiles.js'
 
 export type ProviderFallbackResolution = {
