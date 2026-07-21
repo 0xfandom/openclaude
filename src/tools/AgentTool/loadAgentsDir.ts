@@ -570,8 +570,11 @@ export function parseAgentFromMarkdown(
       return null
     }
 
-    // Unescape newlines in whenToUse that were escaped for YAML parsing
-    whenToUse = whenToUse.replace(/\\n/g, '\n')
+    // No manual unescaping here: parseYaml already decoded the double-quoted
+    // scalar, so `\n` in the file is a newline by the time we see it. Running
+    // this replace on top destroyed any literal backslash-n the user actually
+    // wrote — a description mentioning `C:\node` came back with a newline in
+    // the middle of it.
 
     const color = frontmatter['color'] as AgentColorName | undefined
     const modelRaw = frontmatter['model']

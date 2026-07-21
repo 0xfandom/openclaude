@@ -40,7 +40,12 @@ export function formatAgentAsMarkdown(
   const escapedWhenToUse = whenToUseStr
     .replace(/\\/g, '\\\\') // Escape backslashes first
     .replace(/"/g, '\\"') // Escape double quotes
-    .replace(/\n/g, '\\\\n') // Escape newlines as \\n so yaml preserves them as \n
+    // YAML's own escape for a newline inside a double-quoted scalar. Writing
+    // two backslashes instead made this ambiguous: YAML collapses `\\` to `\`,
+    // so a real newline and a literal backslash-n both reached the reader as
+    // `\n` and the reader turned both into newlines. Windows paths were the
+    // visible casualty — `C:\node` came back as `C:` + newline + `ode`.
+    .replace(/\n/g, '\\n')
 
   // Omit tools field entirely when tools is undefined or ['*'] (all tools allowed)
   const isAllTools =
