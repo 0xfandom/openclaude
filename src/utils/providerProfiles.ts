@@ -834,17 +834,17 @@ function getHostDedicatedCredentialEnv(
  * Whether the process env carries the profile-owned value for every dedicated
  * host credential the profile expects. Uses getHostDedicatedCredentialEnv so
  * the alignment contract can never fall behind what application/persistence
- * mirror. Vacuously true when the key is excluded or the profile has none.
+ * mirror, including absent credentials on keyless profiles.
  */
 function hostDedicatedCredentialsAligned(
   processEnv: NodeJS.ProcessEnv,
   profile: ProviderProfile,
   includeApiKey: boolean,
 ): boolean {
-  if (!includeApiKey || !profile.apiKey) {
+  if (!includeApiKey) {
     return true
   }
-  const dedicated = getHostDedicatedCredentialEnv(profile.baseUrl, profile.apiKey)
+  const dedicated = getHostDedicatedCredentialEnv(profile.baseUrl, profile.apiKey ?? '')
   return Object.entries(dedicated).every(([key, value]) =>
     sameOptionalEnvValue(processEnv[key], value),
   )

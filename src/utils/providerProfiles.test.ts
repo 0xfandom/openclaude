@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 
 import { acquireEnvMutex, releaseEnvMutex } from '../entrypoints/sdk/shared.js'
 import { resolveRouteCredentialValue } from '../integrations/routeMetadata.js'
+import { snapshotEnv } from '../test/envSnapshot.js'
 import type { ProviderProfile } from './config.js'
 
 const nonce = `${Date.now()}-${Math.random()}`
@@ -2986,6 +2987,34 @@ describe('applyActiveProviderProfileFromConfig', () => {
     )
   })
 
+  for (const { baseUrl, key } of [
+    { baseUrl: 'https://api.x.ai/v1', key: 'XAI_API_KEY' },
+    { baseUrl: 'https://api.venice.ai/api/v1', key: 'VENICE_API_KEY' },
+    { baseUrl: 'https://api.xiaomimimo.com/v1', key: 'MIMO_API_KEY' },
+  ]) {
+    test(`reconciliation clears unexpected ${key} for a keyless profile`, async () => {
+      const { applyProviderProfileToProcessEnv, applyActiveProviderProfileFromConfig } =
+        await importFreshProviderProfileModules()
+      const profile = buildProfile({ provider: 'openai', baseUrl, apiKey: undefined })
+      const restoreEnv = snapshotEnv([key])
+      try {
+        applyProviderProfileToProcessEnv(profile)
+        expect(process.env[key]).toBeUndefined()
+        process.env[key] = 'unexpected-key'
+
+        applyActiveProviderProfileFromConfig({
+          ...realConfig.getGlobalConfig(),
+          providerProfiles: [profile],
+          activeProviderProfileId: profile.id,
+        })
+
+        expect(process.env[key]).toBeUndefined()
+      } finally {
+        restoreEnv()
+      }
+    })
+  }
+
   test('reconciliation never mirrors a MiniMax key for a lookalike host', async () => {
     const { applyProviderProfileToProcessEnv, applyActiveProviderProfileFromConfig } =
       await importFreshProviderProfileModules()
@@ -3989,8 +4018,8 @@ describe('setActiveProviderProfile', () => {
   // mirroring these, so Venice persisted only OPENAI_API_KEY and MiniMax had no
   // mirror at all.
   for (const vendor of [
-    { name: 'Venice', baseUrl: 'https://api.venice.ai/api/v1', key: 'VENICE_API_KEY' },
-    { name: 'MiniMax', baseUrl: 'https://api.minimax.io/v1', key: 'MINIMAX_API_KEY' },
+    { name: 'Venice', route: 'venice', baseUrl: 'https://api.venice.ai/api/v1', key: 'VENICE_API_KEY' },
+    { name: 'MiniMax', route: 'minimax', baseUrl: 'https://api.minimax.io/v1', key: 'MINIMAX_API_KEY' },
   ]) {
     test(`persists ${vendor.key} for a generic profile on the canonical ${vendor.name} host`, async () => {
       const configDir = mkdtempSync(join(tmpdir(), 'openclaude-provider-config-'))
@@ -4017,6 +4046,13 @@ describe('setActiveProviderProfile', () => {
 
         expect(result?.id).toBe('vendor_url_prof')
         expect(persisted.env[vendor.key]).toBe('vendor-url-key')
+        const { buildStartupEnvFromProfile } = await import('./providerProfile.js')
+        const restarted = await buildStartupEnvFromProfile({ persisted, processEnv: {} })
+        expect(restarted[vendor.key]).toBe('vendor-url-key')
+        expect(restarted.OPENAI_API_KEY).toBe('vendor-url-key')
+        expect(restarted.OPENAI_BASE_URL).toBe(vendor.baseUrl)
+        expect(restarted.CLAUDE_CODE_PROVIDER_ROUTE_ID).toBe(vendor.route)
+        expect(restarted.CLAUDE_CODE_USE_OPENAI).toBe('1')
       } finally {
         rmSync(configDir, { recursive: true, force: true })
       }

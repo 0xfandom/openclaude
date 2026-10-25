@@ -298,12 +298,11 @@ test('openai launch preserves a persisted GMI Cloud key and prefers a live one',
   assert.equal(rotated.GMI_API_KEY, 'gmi-rotated-key')
 })
 
-test('openai launch preserves a persisted MiniMax credential and reselects the native route after restart', async () => {
+test('openai launch preserves a persisted MiniMax credential and route after restart', async () => {
   // A generic OpenAI profile pointed at the canonical MiniMax host persists its
   // key as MINIMAX_API_KEY. buildLaunchEnv must carry that dedicated credential
-  // into the clean-shell launch environment; the MiniMax client only enters its
-  // native setup while MINIMAX_API_KEY is present, so dropping it on restart
-  // would silently fall back to generic OpenAI behavior.
+  // into the clean-shell launch environment while preserving the explicitly
+  // selected OpenAI-compatible endpoint and protocol.
   const env = await buildLaunchEnv({
     profile: 'openai',
     persisted: profile('openai', {
@@ -318,8 +317,8 @@ test('openai launch preserves a persisted MiniMax credential and reselects the n
 
   assert.equal(env.OPENAI_BASE_URL, 'https://api.minimax.io/v1')
   assert.equal(env.MINIMAX_API_KEY, 'minimax-secret-key')
-  // Assert the reconstructed launch environment actually selects the native
-  // MiniMax route, not merely that the key survived serialization.
+  // Provider identity and wire protocol are separate contracts.
+  assert.equal(env.CLAUDE_CODE_USE_OPENAI, '1')
   assert.equal(resolveEnvOnlyProviderRouteId(env), 'minimax')
 })
 
