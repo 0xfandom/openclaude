@@ -327,6 +327,32 @@ for (const { baseUrl, routeId } of [
   })
 }
 
+for (const [routeId, key] of [
+  ['venice', 'VENICE_API_KEY'],
+  ['xiaomi-mimo', 'MIMO_API_KEY'],
+  ['xiaomi-mimo-token', 'MIMO_API_KEY'],
+] as const) {
+  test(`openai launch retains ${routeId} credentials for an explicitly saved route`, async () => {
+    const baseUrl = 'https://configured-proxy.example/v1'
+    const env = await buildLaunchEnv({
+      profile: 'openai',
+      persisted: profile('openai', {
+        OPENAI_BASE_URL: baseUrl,
+        OPENAI_MODEL: 'configured-model',
+        CLAUDE_CODE_PROVIDER_ROUTE_ID: routeId,
+        OPENAI_API_KEY: 'saved-key',
+        [key]: 'saved-key',
+      }),
+      goal: 'coding',
+      processEnv: {},
+    })
+    assert.equal(env.OPENAI_BASE_URL, baseUrl)
+    assert.equal(env.CLAUDE_CODE_USE_OPENAI, '1')
+    assert.equal(env.CLAUDE_CODE_PROVIDER_ROUTE_ID, routeId)
+    assert.equal(env[key], 'saved-key')
+  })
+}
+
 test('openai launch prefers a live MiniMax key over the persisted one', async () => {
   const env = await buildLaunchEnv({
     profile: 'openai',

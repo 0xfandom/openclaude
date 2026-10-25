@@ -4549,6 +4549,70 @@ describe('setActiveProviderProfile', () => {
     }
   })
 
+  for (const source of [
+    { id: 'venice', baseUrl: 'https://api.venice.ai/api/v1', model: 'venice-uncensored', key: 'VENICE_API_KEY' },
+    { id: 'xiaomi-mimo', baseUrl: 'https://api.xiaomimimo.com/v1', model: 'mimo-v2.5-pro', key: 'MIMO_API_KEY' },
+    { id: 'xiaomi-mimo-token', baseUrl: 'https://token-plan-sgp.xiaomimimo.com/v1', model: 'mimo-v2.5-pro', key: 'MIMO_API_KEY' },
+  ]) {
+    test(`saved generic ${source.id} launch authenticates with the selected provider key`, async () => {
+      const { setActiveProviderProfile } = await importFreshProviderProfileModules()
+      const { buildStartupEnvFromProfile, clearManagedProfileEnv } =
+        await import('./providerProfile.js')
+      const profile = buildProfile({
+        baseUrl: source.baseUrl, model: source.model, apiKey: 'saved-source-key',
+      })
+      saveMockGlobalConfig(current => ({ ...current, providerProfiles: [profile] }))
+      globalThis.fetch = (async (_input, _init) => new Response(JSON.stringify({ data: [] }))) as typeof fetch
+      setActiveProviderProfile(profile.id, { configDir: testConfigDir! })
+      const persisted = JSON.parse(
+        readFileSync(join(testConfigDir!, '.openclaude-profile.json'), 'utf8'),
+      )
+      const target = source.id === 'venice'
+        ? { baseUrl: 'https://api.xiaomimimo.com/v1', model: 'mimo-v2.5-pro', key: 'MIMO_API_KEY' }
+        : { baseUrl: 'https://api.venice.ai/api/v1', model: 'venice-uncensored', key: 'VENICE_API_KEY' }
+
+      // Exercise unchanged restarts and live key rotation as well as a shell
+      // endpoint override, through the same saved profile and actual client.
+      for (const launch of [
+        { target: source, shell: {}, expectedKey: 'saved-source-key' },
+        { target: source, shell: { [source.key]: 'rotated-source-key' }, expectedKey: 'rotated-source-key' },
+        { target, shell: { OPENAI_BASE_URL: target.baseUrl, OPENAI_MODEL: target.model, [target.key]: 'selected-target-key' }, expectedKey: 'selected-target-key' },
+      ]) {
+        const env = await buildStartupEnvFromProfile({ persisted, processEnv: launch.shell })
+        const restore = snapshotEnv([...Object.keys(process.env), ...Object.keys(env)])
+        const originalMacro = (globalThis as Record<string, unknown>).MACRO
+        try {
+          ;(globalThis as Record<string, unknown>).MACRO = { VERSION: 'test-version' }
+          clearManagedProfileEnv(process.env)
+          Object.assign(process.env, env)
+          let capturedUrl: string | undefined
+          let capturedHeaders: Headers | undefined
+          globalThis.fetch = (async (input, init) => {
+            capturedUrl = String(input)
+            capturedHeaders = new Headers(init?.headers)
+            return new Response(JSON.stringify({
+              id: 'chat-profile', object: 'chat.completion', model: launch.target.model,
+              choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+              usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+            }), { headers: { 'Content-Type': 'application/json' } })
+          }) as typeof fetch
+          const { getAnthropicClient } = await import('../services/api/client.js')
+          const client = await getAnthropicClient({ maxRetries: 0, model: launch.target.model })
+          await client.beta.messages.create({
+            model: launch.target.model, max_tokens: 16,
+            messages: [{ role: 'user', content: 'hello' }],
+          })
+          expect(capturedUrl).toBe(`${launch.target.baseUrl}/chat/completions`)
+          expect(capturedHeaders?.get(launch.target.key === 'MIMO_API_KEY' ? 'api-key' : 'authorization'))
+            .toBe(launch.target.key === 'MIMO_API_KEY' ? launch.expectedKey : `Bearer ${launch.expectedKey}`)
+        } finally {
+          ;(globalThis as Record<string, unknown>).MACRO = originalMacro
+          restore()
+        }
+      }
+    })
+  }
+
   test('persists Venice profiles using a legacy-compatible openai startup profile', async () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'openclaude-provider-'))
     const configDir = mkdtempSync(join(tmpdir(), 'openclaude-provider-config-'))

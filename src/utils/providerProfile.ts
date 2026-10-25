@@ -2327,9 +2327,19 @@ export async function buildLaunchEnv(options: {
     if (dedicatedKey === 'AIMLAPI_API_KEY' && effectiveOpenAIRouteId !== 'aimlapi') {
       continue
     }
-    // A MiniMax alias also affects copied-key precedence and provider display.
-    // Admit it only for the selected route, including after a URL override.
+    // These aliases also affect copied-key precedence and provider display.
+    // Admit them only for the selected route, including after a URL override.
     if (dedicatedKey === 'MINIMAX_API_KEY' && effectiveOpenAIRouteId !== 'minimax') {
+      continue
+    }
+    if (dedicatedKey === 'VENICE_API_KEY' && effectiveOpenAIRouteId !== 'venice') {
+      continue
+    }
+    if (
+      dedicatedKey === 'MIMO_API_KEY' &&
+      effectiveOpenAIRouteId !== 'xiaomi-mimo' &&
+      effectiveOpenAIRouteId !== 'xiaomi-mimo-token'
+    ) {
       continue
     }
     if (dedicatedKey === 'APISMART_API_KEY' && effectiveOpenAIRouteId !== 'apismart') {
