@@ -837,9 +837,9 @@ bun run dev:atomic-chat
 
 If no profile exists yet, `dev:profile` uses the same goal-aware defaults when picking the initial model.
 
-Newly saved profiles for canonical MiniMax, Venice, and MiMo endpoints retain a
-provider-specific key, including profiles configured as generic OpenAI-compatible
-providers. On the same route, that saved key takes precedence over an ambient
+Profiles activated through `/provider` for canonical MiniMax, Venice, and MiMo
+endpoints retain a provider-specific key, including profiles configured as generic
+OpenAI-compatible providers. On the same route, that saved key takes precedence over an ambient
 `OPENAI_API_KEY` or `OPENAI_API_KEYS` pool. To override it for a launch, set
 `MINIMAX_API_KEY`, `VENICE_API_KEY`, or `MIMO_API_KEY` in your shell; the live
 provider-specific value takes precedence over the saved value. This applies to

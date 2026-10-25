@@ -4584,6 +4584,7 @@ describe('setActiveProviderProfile', () => {
       ]) {
         const env = await buildStartupEnvFromProfile({ persisted, processEnv: launch.shell })
         const restore = snapshotEnv([...Object.keys(process.env), ...Object.keys(env)])
+        const hadOwnMacro = Object.hasOwn(globalThis, 'MACRO')
         const originalMacro = (globalThis as Record<string, unknown>).MACRO
         try {
           ;(globalThis as Record<string, unknown>).MACRO = { VERSION: 'test-version' }
@@ -4610,7 +4611,11 @@ describe('setActiveProviderProfile', () => {
           expect(capturedHeaders?.get(launch.target.key === 'MIMO_API_KEY' ? 'api-key' : 'authorization'))
             .toBe(launch.target.key === 'MIMO_API_KEY' ? launch.expectedKey : `Bearer ${launch.expectedKey}`)
         } finally {
-          ;(globalThis as Record<string, unknown>).MACRO = originalMacro
+          if (hadOwnMacro) {
+            ;(globalThis as Record<string, unknown>).MACRO = originalMacro
+          } else {
+            delete (globalThis as Record<string, unknown>).MACRO
+          }
           restore()
         }
       }
