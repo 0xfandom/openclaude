@@ -4611,10 +4611,16 @@ describe('setActiveProviderProfile', () => {
     { id: 'xiaomi-mimo', baseUrl: 'https://api.xiaomimimo.com/v1', model: 'mimo-v2.5-pro', key: 'MIMO_API_KEY' },
     { id: 'xiaomi-mimo-token', baseUrl: 'https://token-plan-sgp.xiaomimimo.com/v1', model: 'mimo-v2.5-pro', key: 'MIMO_API_KEY' },
   ]) {
-    test(`saved generic ${source.id} launch authenticates with the selected provider key`, async () => {
-      const { setActiveProviderProfile } = await importFreshProviderProfileModules()
+    test(`saved generic ${source.id} launch and pane teammate authenticate with the selected provider key`, async () => {
+      const {
+        setActiveProviderProfile,
+        applyActiveProviderProfileFromConfig,
+        clearProviderProfileEnvFromProcessEnv,
+      } = await importFreshProviderProfileModules()
       const { buildStartupEnvFromProfile, clearManagedProfileEnv } =
         await import('./providerProfile.js')
+      const { buildInheritedEnvVars } = await import('./swarm/spawnUtils.js')
+      const { tryParseShellCommand } = await import('./bash/shellQuote.js')
       const profile = buildProfile({
         baseUrl: source.baseUrl, model: source.model, apiKey: 'saved-source-key',
       })
@@ -4639,7 +4645,11 @@ describe('setActiveProviderProfile', () => {
         { target, shell: { OPENAI_BASE_URL: target.baseUrl, OPENAI_MODEL: target.model, [target.key]: 'selected-target-key' }, expectedKey: 'selected-target-key' },
       ]) {
         const env = await buildStartupEnvFromProfile({ persisted, processEnv: launch.shell })
-        const restore = snapshotEnv([...Object.keys(process.env), ...Object.keys(env)])
+        const restore = snapshotEnv([
+          ...Object.keys(process.env), ...Object.keys(env),
+          'CLAUDECODE', 'CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS',
+          'CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST',
+        ])
         const hadOwnMacro = Object.hasOwn(globalThis, 'MACRO')
         const originalMacro = (globalThis as Record<string, unknown>).MACRO
         try {
@@ -4648,7 +4658,9 @@ describe('setActiveProviderProfile', () => {
           Object.assign(process.env, env)
           let capturedUrl: string | undefined
           let capturedHeaders: Headers | undefined
+          let capturedRequests = 0
           globalThis.fetch = (async (input, init) => {
+            capturedRequests++
             capturedUrl = String(input)
             capturedHeaders = new Headers(init?.headers)
             return new Response(JSON.stringify({
@@ -4658,14 +4670,44 @@ describe('setActiveProviderProfile', () => {
             }), { headers: { 'Content-Type': 'application/json' } })
           }) as typeof fetch
           const { getAnthropicClient } = await import('../services/api/client.js')
-          const client = await getAnthropicClient({ maxRetries: 0, model: launch.target.model })
-          await client.beta.messages.create({
-            model: launch.target.model, max_tokens: 16,
-            messages: [{ role: 'user', content: 'hello' }],
-          })
-          expect(capturedUrl).toBe(`${launch.target.baseUrl}/chat/completions`)
-          expect(capturedHeaders?.get(launch.target.key === 'MIMO_API_KEY' ? 'api-key' : 'authorization'))
-            .toBe(launch.target.key === 'MIMO_API_KEY' ? launch.expectedKey : `Bearer ${launch.expectedKey}`)
+          const assertRequest = async () => {
+            const previousRequests = capturedRequests
+            const client = await getAnthropicClient({ maxRetries: 0, model: launch.target.model })
+            await client.beta.messages.create({
+              model: launch.target.model, max_tokens: 16,
+              messages: [{ role: 'user', content: 'hello' }],
+            })
+            expect(capturedRequests).toBe(previousRequests + 1)
+            expect(capturedUrl).toBe(`${launch.target.baseUrl}/chat/completions`)
+            expect(capturedHeaders?.get(launch.target.key === 'MIMO_API_KEY' ? 'api-key' : 'authorization'))
+              .toBe(launch.target.key === 'MIMO_API_KEY' ? launch.expectedKey : `Bearer ${launch.expectedKey}`)
+          }
+          await assertRequest()
+
+          // PaneBackendExecutor sends only these explicit assignments to a
+          // tmux/login shell; it cannot rely on the parent's other env vars.
+          const parsed = tryParseShellCommand(buildInheritedEnvVars())
+          if (!parsed.success) throw new Error(parsed.error)
+          const teammateEnv = Object.fromEntries(parsed.tokens.map(token => {
+            if (typeof token !== 'string' || !token.includes('=')) {
+              throw new Error('Expected a teammate environment assignment')
+            }
+            const separator = token.indexOf('=')
+            return [token.slice(0, separator), token.slice(separator + 1)]
+          }))
+          // Follow the child's plural-profile then startup-file stages. Its
+          // complete incoming selection must preserve the parent's credential.
+          expect(applyActiveProviderProfileFromConfig({
+            ...realConfig.getGlobalConfig(),
+            providerProfiles: [profile],
+            activeProviderProfileId: profile.id,
+          }, { processEnv: teammateEnv })).toBeUndefined()
+          const childEnv = { ...await buildStartupEnvFromProfile({
+            persisted, processEnv: teammateEnv,
+          }) }
+          clearProviderProfileEnvFromProcessEnv()
+          Object.assign(process.env, childEnv)
+          await assertRequest()
         } finally {
           if (hadOwnMacro) {
             ;(globalThis as Record<string, unknown>).MACRO = originalMacro

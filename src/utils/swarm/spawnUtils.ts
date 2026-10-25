@@ -109,6 +109,11 @@ const TEAMMATE_ENV_VARS = [
   'GH_TOKEN',
   'OPENAI_API_KEYS',
   'OPENAI_API_KEY',
+  // Saved-profile launches can select these ahead of ambient generic keys.
+  // Preserve that selection in the pane's explicit environment.
+  'MINIMAX_API_KEY',
+  'VENICE_API_KEY',
+  'MIMO_API_KEY',
   'LLMTR_API_KEY',
   'MERGE_GATEWAY_API_KEY',
   'CMD_API_KEY',
