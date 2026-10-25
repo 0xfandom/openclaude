@@ -837,10 +837,17 @@ bun run dev:atomic-chat
 
 If no profile exists yet, `dev:profile` uses the same goal-aware defaults when picking the initial model.
 
-For saved MiniMax profiles, launch reconstruction retains `MINIMAX_API_KEY` only
-while the selected route is MiniMax. A shell override to another provider's URL
-does not carry that dedicated key into the new launch; on MiniMax, a shell
-`MINIMAX_API_KEY` takes precedence over the saved value.
+Newly saved profiles for canonical MiniMax, Venice, and MiMo endpoints retain a
+provider-specific key, including profiles configured as generic OpenAI-compatible
+providers. On the same route, that saved key takes precedence over an ambient
+`OPENAI_API_KEY` or `OPENAI_API_KEYS` pool. To override it for a launch, set
+`MINIMAX_API_KEY`, `VENICE_API_KEY`, or `MIMO_API_KEY` in your shell; the live
+provider-specific value takes precedence over the saved value. This applies to
+both MiMo API and token-plan routes.
+
+Launch reconstruction retains these dedicated keys only for their matching
+routes. A shell override to another provider's URL does not carry the saved
+source provider's dedicated key into the new launch.
 
 ### Provider Profile Model Picker Mode
 

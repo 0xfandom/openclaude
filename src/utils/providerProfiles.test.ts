@@ -4550,6 +4550,7 @@ describe('setActiveProviderProfile', () => {
   })
 
   for (const source of [
+    { id: 'minimax', baseUrl: 'https://api.minimax.io/v1', model: 'MiniMax-M2.7', key: 'MINIMAX_API_KEY' },
     { id: 'venice', baseUrl: 'https://api.venice.ai/api/v1', model: 'venice-uncensored', key: 'VENICE_API_KEY' },
     { id: 'xiaomi-mimo', baseUrl: 'https://api.xiaomimimo.com/v1', model: 'mimo-v2.5-pro', key: 'MIMO_API_KEY' },
     { id: 'xiaomi-mimo-token', baseUrl: 'https://token-plan-sgp.xiaomimimo.com/v1', model: 'mimo-v2.5-pro', key: 'MIMO_API_KEY' },
@@ -4571,10 +4572,13 @@ describe('setActiveProviderProfile', () => {
         ? { baseUrl: 'https://api.xiaomimimo.com/v1', model: 'mimo-v2.5-pro', key: 'MIMO_API_KEY' }
         : { baseUrl: 'https://api.venice.ai/api/v1', model: 'venice-uncensored', key: 'VENICE_API_KEY' }
 
-      // Exercise unchanged restarts and live key rotation as well as a shell
-      // endpoint override, through the same saved profile and actual client.
+      // Saved dedicated keys outrank ambient generic keys, including pools.
+      // Exercise restarts, dedicated key rotation and endpoint overrides through
+      // the same saved profile and actual client (including MiniMax's /v1 path).
       for (const launch of [
         { target: source, shell: {}, expectedKey: 'saved-source-key' },
+        { target: source, shell: { OPENAI_API_KEY: 'shell-generic-key' }, expectedKey: 'saved-source-key' },
+        { target: source, shell: { OPENAI_API_KEYS: 'shell-pool-key-1,shell-pool-key-2' }, expectedKey: 'saved-source-key' },
         { target: source, shell: { [source.key]: 'rotated-source-key' }, expectedKey: 'rotated-source-key' },
         { target, shell: { OPENAI_BASE_URL: target.baseUrl, OPENAI_MODEL: target.model, [target.key]: 'selected-target-key' }, expectedKey: 'selected-target-key' },
       ]) {
