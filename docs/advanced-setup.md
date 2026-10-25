@@ -837,6 +837,11 @@ bun run dev:atomic-chat
 
 If no profile exists yet, `dev:profile` uses the same goal-aware defaults when picking the initial model.
 
+For saved MiniMax profiles, launch reconstruction retains `MINIMAX_API_KEY` only
+while the selected route is MiniMax. A shell override to another provider's URL
+does not carry that dedicated key into the new launch; on MiniMax, a shell
+`MINIMAX_API_KEY` takes precedence over the saved value.
+
 ### Provider Profile Model Picker Mode
 
 When a saved provider profile is active, `/model` can either show the provider's

@@ -298,29 +298,34 @@ test('openai launch preserves a persisted GMI Cloud key and prefers a live one',
   assert.equal(rotated.GMI_API_KEY, 'gmi-rotated-key')
 })
 
-test('openai launch preserves a persisted MiniMax credential and route after restart', async () => {
-  // A generic OpenAI profile pointed at the canonical MiniMax host persists its
-  // key as MINIMAX_API_KEY. buildLaunchEnv must carry that dedicated credential
-  // into the clean-shell launch environment while preserving the explicitly
-  // selected OpenAI-compatible endpoint and protocol.
-  const env = await buildLaunchEnv({
-    profile: 'openai',
-    persisted: profile('openai', {
-      OPENAI_BASE_URL: 'https://api.minimax.io/v1',
-      OPENAI_MODEL: 'MiniMax-M2.5',
-      OPENAI_API_KEY: 'minimax-secret-key',
-      MINIMAX_API_KEY: 'minimax-secret-key',
-    }),
-    goal: 'coding',
-    processEnv: {},
-  })
+for (const { baseUrl, routeId } of [
+  { baseUrl: 'https://api.minimax.io/v1' },
+  { baseUrl: 'https://api.minimaxi.com/v1' },
+  { baseUrl: 'https://minimax-proxy.example.com/v1', routeId: 'minimax' },
+]) {
+  test(`openai launch preserves a persisted MiniMax credential and route at ${baseUrl}`, async () => {
+    // Keep the dedicated key for canonical endpoints and an explicitly saved
+    // route identity without changing the OpenAI-compatible endpoint/protocol.
+    const env = await buildLaunchEnv({
+      profile: 'openai',
+      persisted: profile('openai', {
+        OPENAI_BASE_URL: baseUrl,
+        OPENAI_MODEL: 'MiniMax-M2.5',
+        ...(routeId ? { CLAUDE_CODE_PROVIDER_ROUTE_ID: routeId } : {}),
+        OPENAI_API_KEY: 'minimax-secret-key',
+        MINIMAX_API_KEY: 'minimax-secret-key',
+      }),
+      goal: 'coding',
+      processEnv: {},
+    })
 
-  assert.equal(env.OPENAI_BASE_URL, 'https://api.minimax.io/v1')
-  assert.equal(env.MINIMAX_API_KEY, 'minimax-secret-key')
-  // Provider identity and wire protocol are separate contracts.
-  assert.equal(env.CLAUDE_CODE_USE_OPENAI, '1')
-  assert.equal(resolveEnvOnlyProviderRouteId(env), 'minimax')
-})
+    assert.equal(env.OPENAI_BASE_URL, baseUrl)
+    assert.equal(env.MINIMAX_API_KEY, 'minimax-secret-key')
+    // Provider identity and wire protocol are separate contracts.
+    assert.equal(env.CLAUDE_CODE_USE_OPENAI, '1')
+    assert.equal(env.CLAUDE_CODE_PROVIDER_ROUTE_ID, 'minimax')
+  })
+}
 
 test('openai launch prefers a live MiniMax key over the persisted one', async () => {
   const env = await buildLaunchEnv({

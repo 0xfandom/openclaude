@@ -2327,6 +2327,11 @@ export async function buildLaunchEnv(options: {
     if (dedicatedKey === 'AIMLAPI_API_KEY' && effectiveOpenAIRouteId !== 'aimlapi') {
       continue
     }
+    // A MiniMax alias also affects copied-key precedence and provider display.
+    // Admit it only for the selected route, including after a URL override.
+    if (dedicatedKey === 'MINIMAX_API_KEY' && effectiveOpenAIRouteId !== 'minimax') {
+      continue
+    }
     if (dedicatedKey === 'APISMART_API_KEY' && effectiveOpenAIRouteId !== 'apismart') {
       continue
     }

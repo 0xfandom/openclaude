@@ -8,6 +8,12 @@ import {
 } from '../../integrations/index.js'
 import { publicBuildVersion } from '../../utils/version.js'
 import { resetModelStringsForTestingOnly } from '../../bootstrap/state.js'
+import { snapshotEnv } from '../../test/envSnapshot.js'
+import {
+  buildLaunchEnv,
+  buildStartupEnvFromProfile,
+  createProfileFile,
+} from '../../utils/providerProfile.js'
 
 // bun:test keeps mock.module() registrations process-global across test files.
 // Load and re-register the real module before importing the client so a prior
@@ -832,6 +838,77 @@ for (const baseEnv of ['OPENAI_BASE_URL', 'OPENAI_API_BASE']) {
     })
   }
 }
+
+for (const source of ['persisted', 'ambient'] as const) {
+  test(`profile launch uses the Venice credential despite a ${source} MiniMax alias`, async () => {
+    clearEnvForMiniMaxOnlyTest()
+    const env = await buildLaunchEnv({
+      profile: 'openai',
+      persisted: createProfileFile('openai', {
+        OPENAI_BASE_URL: 'https://api.minimax.io/v1',
+        OPENAI_MODEL: 'MiniMax-M3',
+        OPENAI_API_KEY: 'saved-minimax-key',
+        MINIMAX_API_KEY: 'saved-minimax-key',
+      }),
+      goal: 'coding',
+      processEnv: {
+        OPENAI_BASE_URL: 'https://api.venice.ai/api/v1',
+        OPENAI_MODEL: 'venice-uncensored',
+        VENICE_API_KEY: 'selected-venice-key',
+        ...(source === 'ambient' ? {
+          OPENAI_API_KEY: 'ambient-minimax-key',
+          MINIMAX_API_KEY: 'ambient-minimax-key',
+        } : {}),
+      },
+    })
+    const restore = snapshotEnv(Object.keys(env))
+    try {
+      Object.assign(process.env, env)
+      let capturedUrl: string | undefined
+      let capturedHeaders: Headers | undefined
+      globalThis.fetch = (async (input, init) => {
+        capturedUrl = String(input)
+        capturedHeaders = new Headers(init?.headers)
+        return new Response(JSON.stringify({
+          id: 'chat-venice', object: 'chat.completion', model: 'venice-uncensored',
+          choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        }), { headers: { 'Content-Type': 'application/json' } })
+      }) as FetchType
+      const client = await getAnthropicClient({ maxRetries: 0, model: 'venice-uncensored' })
+      await client.beta.messages.create({
+        model: 'venice-uncensored', max_tokens: 16,
+        messages: [{ role: 'user', content: 'hello' }],
+      })
+      expect(capturedUrl).toBe('https://api.venice.ai/api/v1/chat/completions')
+      expect(capturedHeaders?.get('authorization')).toBe('Bearer selected-venice-key')
+      expect(env.MINIMAX_API_KEY).toBeUndefined()
+    } finally {
+      restore()
+    }
+  })
+}
+
+test('saved OpenAI startup keeps its provider label despite an ambient MiniMax key', async () => {
+  clearEnvForMiniMaxOnlyTest()
+  const env = await buildStartupEnvFromProfile({
+    persisted: createProfileFile('openai', {
+      OPENAI_BASE_URL: 'https://api.openai.com/v1',
+      OPENAI_MODEL: 'gpt-4o',
+      OPENAI_API_KEY: 'saved-openai-key',
+    }),
+    processEnv: { MINIMAX_API_KEY: 'ambient-minimax-key' },
+  })
+  const restore = snapshotEnv(Object.keys(env))
+  try {
+    Object.assign(process.env, env)
+    const { detectProvider } = await import('../../components/StartupScreen.js')
+    expect(detectProvider().name).toBe('OpenAI')
+    expect(env.MINIMAX_API_KEY).toBeUndefined()
+  } finally {
+    restore()
+  }
+})
 
 test('selected Gemini ignores dormant native MiniMax transport settings', async () => {
   clearEnvForMiniMaxOnlyTest()
