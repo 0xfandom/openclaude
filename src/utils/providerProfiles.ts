@@ -805,6 +805,57 @@ function serializeProfileContextWindows(
  * detected by route id or profile shape (aimlapi, apismart, atlas, cloudflare,
  * bankr, nvidia, …) keep their own predicates at each site.
  */
+const HOST_DEDICATED_ROUTE_IDS = new Set([
+  'minimax',
+  'venice',
+  'xai',
+  'xiaomi-mimo',
+  'xiaomi-mimo-token',
+])
+
+/**
+ * Route identity already established for this exact profile in the managed
+ * process env (launch reconstruction). Honor it on reconcile reapply when the
+ * profile URL does not resolve to a different provider. Do not infer it from
+ * a URL substring, and do not copy it onto a different profile.
+ */
+function managedExplicitHostRouteId(
+  profile: ProviderProfile,
+  processEnv: NodeJS.ProcessEnv,
+): string | undefined {
+  if (trimOrUndefined(processEnv[PROFILE_ENV_APPLIED_ID]) !== profile.id) {
+    return undefined
+  }
+  const routeId = trimOrUndefined(processEnv.CLAUDE_CODE_PROVIDER_ROUTE_ID)
+  if (!routeId || !HOST_DEDICATED_ROUTE_IDS.has(routeId)) {
+    return undefined
+  }
+  const resolvedFromUrl = resolveRouteIdFromBaseUrl(profile.baseUrl)
+  if (
+    resolvedFromUrl &&
+    resolvedFromUrl !== 'openai' &&
+    resolvedFromUrl !== routeId
+  ) {
+    return undefined
+  }
+  return routeId
+}
+
+function hostDedicatedRouteForProfile(
+  profile: ProviderProfile,
+  processEnv: NodeJS.ProcessEnv,
+  profileRoute: { routeId?: string; vendorId?: string },
+): { routeId?: string; vendorId?: string } {
+  const managedRouteId = managedExplicitHostRouteId(profile, processEnv)
+  if (
+    !managedRouteId ||
+    (profileRoute.routeId && HOST_DEDICATED_ROUTE_IDS.has(profileRoute.routeId))
+  ) {
+    return profileRoute
+  }
+  return { routeId: managedRouteId, vendorId: profileRoute.vendorId }
+}
+
 function getHostDedicatedCredentialEnv(
   baseUrl: string | undefined,
   apiKey: string,
@@ -814,7 +865,11 @@ function getHostDedicatedCredentialEnv(
   if (route?.routeId === 'xai' || isXaiBaseUrl(baseUrl)) {
     env.XAI_API_KEY = apiKey
   }
-  if (route?.vendorId === 'minimax' || isMiniMaxBaseUrl(baseUrl)) {
+  if (
+    route?.routeId === 'minimax' ||
+    route?.vendorId === 'minimax' ||
+    isMiniMaxBaseUrl(baseUrl)
+  ) {
     env.MINIMAX_API_KEY = apiKey
   }
   if (route?.routeId === 'venice' || isVeniceBaseUrl(baseUrl)) {
@@ -844,7 +899,15 @@ function hostDedicatedCredentialsAligned(
   if (!includeApiKey) {
     return true
   }
-  const dedicated = getHostDedicatedCredentialEnv(profile.baseUrl, profile.apiKey ?? '')
+  const dedicated = getHostDedicatedCredentialEnv(
+    profile.baseUrl,
+    profile.apiKey ?? '',
+    hostDedicatedRouteForProfile(
+      profile,
+      processEnv,
+      resolveProfileRoute(profile.provider),
+    ),
+  )
   return Object.entries(dedicated).every(([key, value]) =>
     sameOptionalEnvValue(processEnv[key], value),
   )
@@ -1254,11 +1317,29 @@ export function applyProviderProfileToProcessEnv(
       openAIProfileEnv.OPENAI_API_KEY = profile.apiKey
       // Host/route-detected dedicated keys (xai, minimax, venice, mimo) come
       // from the shared mapping so this path, startup persistence, and env
-      // alignment stay in lockstep.
+      // alignment stay in lockstep. A generic OpenAI profile keeps an explicit
+      // host route only when this same profile's managed env already has it
+      // (launch reconstruction); reconcile must not drop that credential.
+      const dedicatedRoute = hostDedicatedRouteForProfile(
+        profile,
+        process.env,
+        route,
+      )
       Object.assign(
         openAIProfileEnv,
-        getHostDedicatedCredentialEnv(profile.baseUrl, profile.apiKey, route),
+        getHostDedicatedCredentialEnv(
+          profile.baseUrl,
+          profile.apiKey,
+          dedicatedRoute,
+        ),
       )
+      if (
+        dedicatedRoute.routeId &&
+        HOST_DEDICATED_ROUTE_IDS.has(dedicatedRoute.routeId) &&
+        route.routeId !== dedicatedRoute.routeId
+      ) {
+        openAIProfileEnv.CLAUDE_CODE_PROVIDER_ROUTE_ID = dedicatedRoute.routeId
+      }
       if (
         route.gatewayId === 'nvidia-nim' ||
         normalizedProfileBaseUrl.toLowerCase().includes('nvidia') ||

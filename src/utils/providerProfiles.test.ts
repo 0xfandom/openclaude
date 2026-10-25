@@ -3015,6 +3015,62 @@ describe('applyActiveProviderProfileFromConfig', () => {
     })
   }
 
+  test('reconciliation keeps an explicit MiniMax route credential on a proxy host', async () => {
+    const { applyActiveProviderProfileFromConfig } =
+      await importFreshProviderProfileModules()
+    const { buildLaunchEnv, createProfileFile } = await import(
+      './providerProfile.js'
+    )
+    const profile = buildProfile({
+      id: 'minimax_proxy',
+      name: 'MiniMax proxy',
+      provider: 'openai',
+      baseUrl: 'https://minimax-proxy.example.com/v1',
+      model: 'MiniMax-M2.5',
+      apiKey: 'correct-key',
+    })
+    const launch = await buildLaunchEnv({
+      profile: 'openai',
+      goal: 'coding',
+      processEnv: {},
+      persisted: createProfileFile('openai', {
+        OPENAI_BASE_URL: profile.baseUrl,
+        OPENAI_MODEL: profile.model,
+        CLAUDE_CODE_PROVIDER_ROUTE_ID: 'minimax',
+        OPENAI_API_KEY: 'correct-key',
+        MINIMAX_API_KEY: 'correct-key',
+      }),
+    })
+    const restoreEnv = snapshotEnv([
+      ...Object.keys(process.env),
+      ...Object.keys(launch),
+    ])
+    try {
+      Object.assign(process.env, launch)
+      process.env.CLAUDE_CODE_PROVIDER_PROFILE_ENV_APPLIED = '1'
+      process.env.CLAUDE_CODE_PROVIDER_PROFILE_ENV_APPLIED_ID = profile.id
+      process.env.OPENAI_API_KEY = 'drift-openai'
+      process.env.MINIMAX_API_KEY = 'wrong-minimax'
+
+      applyActiveProviderProfileFromConfig({
+        providerProfiles: [profile],
+        activeProviderProfileId: profile.id,
+      } as any)
+
+      expect(process.env.OPENAI_API_KEY).toBe('correct-key')
+      expect(process.env.MINIMAX_API_KEY).toBe('correct-key')
+      expect(process.env.CLAUDE_CODE_PROVIDER_ROUTE_ID).toBe('minimax')
+      expect(
+        resolveRouteCredentialValue({
+          routeId: 'minimax',
+          baseUrl: process.env.OPENAI_BASE_URL,
+        }),
+      ).toBe('correct-key')
+    } finally {
+      restoreEnv()
+    }
+  })
+
   test('reconciliation never mirrors a MiniMax key for a lookalike host', async () => {
     const { applyProviderProfileToProcessEnv, applyActiveProviderProfileFromConfig } =
       await importFreshProviderProfileModules()
